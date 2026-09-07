@@ -1,0 +1,158 @@
+:root {
+  --bg: #0e1013;
+  --panel: #16191e;
+  --panel-2: #1d2127;
+  --line: #2a2f37;
+  --text: #e6e8ea;
+  --muted: #8b939e;
+  --accent: #4f9dff;
+  --ok: #3ddc84;
+  --warn: #ffb74d;
+  --bad: #ff6b5e;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+button, input, select, textarea { font: inherit; color: inherit; }
+
+.app { min-height: 100vh; }
+
+.topbar {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 24px; flex-wrap: wrap;
+  padding: 14px 24px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+  position: sticky; top: 0; z-index: 10;
+}
+
+.brand { font-weight: 600; font-size: 15px; }
+.muted { color: var(--muted); font-weight: 400; }
+
+.tabs { display: flex; gap: 4px; }
+
+.tab {
+  background: transparent; border: 1px solid transparent; border-radius: 6px;
+  padding: 7px 14px; cursor: pointer; color: var(--muted);
+}
+.tab:hover { color: var(--text); background: var(--panel-2); }
+.tab.active { color: var(--text); background: var(--panel-2); border-color: var(--line); }
+
+.content { padding: 24px; max-width: 1180px; margin: 0 auto; }
+
+h2 { margin: 0 0 4px; font-size: 18px; font-weight: 600; }
+.lead { color: var(--muted); margin: 0 0 20px; }
+
+.card {
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: 10px; padding: 16px;
+}
+
+.row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.spacer { flex: 1; }
+
+button.btn {
+  background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px;
+  padding: 8px 14px; cursor: pointer;
+}
+button.btn:hover:not(:disabled) { border-color: #3e4753; }
+button.btn:disabled { opacity: 0.45; cursor: default; }
+button.btn.primary { background: var(--accent); border-color: var(--accent); color: #06121f; font-weight: 600; }
+button.btn.primary:hover:not(:disabled) { background: #6aaeff; }
+button.btn.danger { color: var(--bad); }
+button.btn.small { padding: 4px 9px; font-size: 13px; }
+
+input[type='number'], input[type='text'], select {
+  background: var(--bg); border: 1px solid var(--line); border-radius: 6px;
+  padding: 6px 9px;
+}
+input[type='number'] { width: 78px; }
+input[readonly] { width: 78px; color: var(--muted); background: var(--panel-2); }
+
+.notice { border-radius: 8px; padding: 10px 14px; margin-bottom: 16px; border: 1px solid; }
+.notice.error { border-color: #5b2b28; background: #2a1613; color: #ffb2a9; }
+.notice.info { border-color: #24405f; background: #12212f; color: #b8d7ff; }
+.notice.ok { border-color: #234c33; background: #12251b; color: #a8e9c3; }
+
+/* --- biblioteka ---------------------------------------------------------- */
+
+.dropzone {
+  border: 2px dashed var(--line); border-radius: 10px;
+  padding: 28px; text-align: center; color: var(--muted);
+  margin-bottom: 20px; cursor: pointer;
+}
+.dropzone.over { border-color: var(--accent); color: var(--text); background: #101a26; }
+
+.grid {
+  display: grid; gap: 14px;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+}
+
+.asset {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+  overflow: hidden; display: flex; flex-direction: column;
+}
+.asset .thumb {
+  aspect-ratio: 1 / 1.7375; background: #000;
+  display: flex; align-items: center; justify-content: center; overflow: hidden;
+}
+.asset .thumb img, .asset .thumb video { width: 100%; height: 100%; object-fit: cover; display: block; }
+.asset .meta { padding: 9px 10px; font-size: 12px; color: var(--muted); }
+.asset .meta .name { color: var(--text); word-break: break-word; margin-bottom: 3px; }
+.asset .actions { padding: 0 10px 10px; }
+
+.badges { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 5px; }
+.badge { display: inline-block; padding: 1px 6px; border-radius: 4px; font-size: 11px; }
+.badge.warn { background: #3a2c14; color: var(--warn); }
+.badge.video { background: #16304a; color: var(--accent); }
+
+/* --- plejlista ----------------------------------------------------------- */
+
+.items { display: flex; flex-direction: column; gap: 8px; margin-bottom: 20px; }
+
+.item {
+  display: flex; gap: 14px; align-items: center;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+  padding: 10px 14px;
+}
+.item.dragging { opacity: 0.4; }
+.item.drop-target { border-color: var(--accent); }
+.item.off { opacity: 0.5; }
+.item .handle { cursor: grab; color: var(--muted); font-size: 18px; user-select: none; }
+.item .thumb { width: 42px; height: 73px; background: #000; border-radius: 4px; overflow: hidden; flex: none; }
+.item .thumb img, .item .thumb video { width: 100%; height: 100%; object-fit: cover; display: block; }
+.item .title { flex: 1; min-width: 120px; word-break: break-word; }
+.item .field { display: flex; flex-direction: column; gap: 3px; }
+.item .field label { font-size: 11px; color: var(--muted); }
+
+.motion-extra { display: flex; gap: 8px; }
+
+/* --- pregled zida -------------------------------------------------------- */
+
+.wall-sim { display: flex; flex-direction: column; align-items: center; background: #000; padding: 24px; border-radius: 10px; }
+.wall-sim .panel-frame { background: #000; border: 1px solid #333; overflow: hidden; }
+.wall-sim iframe { border: 0; display: block; transform-origin: top left; }
+
+/* --- stanje panela ------------------------------------------------------- */
+
+.screens { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+
+.screen-card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
+.screen-card.offline { border-color: #4a2320; }
+.screen-head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+.screen-head .n { font-size: 22px; font-weight: 600; }
+.dot { width: 9px; height: 9px; border-radius: 50%; background: var(--bad); }
+.dot.on { background: var(--ok); }
+
+dl.kv { display: grid; grid-template-columns: auto 1fr; gap: 5px 14px; margin: 0 0 14px; font-size: 13px; }
+dl.kv dt { color: var(--muted); }
+dl.kv dd { margin: 0; font-variant-numeric: tabular-nums; word-break: break-all; }
+
+code { font-family: "DejaVu Sans Mono", Menlo, Consolas, monospace; font-size: 12px; }

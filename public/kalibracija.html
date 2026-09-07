@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="bs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Video zid — kalibracija</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hidden; }
+  body { cursor: none; color: #fff; font-family: Arial, Helvetica, sans-serif; }
+
+  #viewport { position: fixed; top: 0; left: 0; right: 0; bottom: 0; overflow: hidden; }
+  #wall { position: absolute; top: 0; left: 0; width: 100%; will-change: transform; }
+
+  .hline { position: absolute; left: 0; width: 100%; height: 4px; background: #2e7dd7; }
+  .hline.major { height: 8px; background: #d7452e; }
+  .hlabel {
+    position: absolute; left: 24px; color: #fff; font-size: 26px;
+    font-family: "DejaVu Sans Mono", Menlo, Consolas, monospace;
+    background: rgba(0, 0, 0, 0.6); padding: 2px 8px;
+  }
+
+  /* Neprekidna vertikalna linija kroz cijelu visinu zida — glavni test. */
+  .vline { position: absolute; top: 0; bottom: 0; width: 6px; background: #ffffff; }
+
+  /* Dijagonala: prelom na spoju se vidi i kad je razmak pogrešan za par piksela. */
+  #diag { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+
+  .seam {
+    position: absolute; left: 0; width: 100%; height: 2px;
+    background: repeating-linear-gradient(90deg, #ffd400 0 20px, transparent 20px 40px);
+  }
+
+  #panelBadge {
+    position: fixed; right: 24px; top: 24px; z-index: 20;
+    font-size: 120px; font-weight: bold; color: rgba(255, 255, 255, 0.22);
+  }
+  #info {
+    position: fixed; left: 24px; top: 24px; z-index: 20;
+    background: rgba(0, 0, 0, 0.75); border: 1px solid #444; padding: 12px 16px;
+    font-family: "DejaVu Sans Mono", Menlo, Consolas, monospace;
+    font-size: 16px; line-height: 1.6; white-space: pre; color: #9fe0a0;
+  }
+</style>
+</head>
+<body>
+
+<div id="viewport">
+  <div id="wall">
+    <svg id="diag" preserveAspectRatio="none"></svg>
+  </div>
+</div>
+
+<div id="panelBadge"></div>
+<pre id="info"></pre>
+
+<script>
+(function () {
+  'use strict';
+
+  var params = {};
+  (function () {
+    var q = location.search.replace(/^\?/, '');
+    if (!q) return;
+    var pairs = q.split('&');
+    for (var i = 0; i < pairs.length; i++) {
+      var kv = pairs[i].split('=');
+      params[decodeURIComponent(kv[0])] = decodeURIComponent(kv[1] || '');
+    }
+  })();
+
+  var DISPLEJ = parseInt(params.displej, 10);
+  if (!(DISPLEJ >= 1 && DISPLEJ <= 3)) DISPLEJ = 1;
+
+  var bezel = params.bezel ? parseInt(params.bezel, 10) : null;
+
+  var viewportEl = document.getElementById('viewport');
+  var wallEl = document.getElementById('wall');
+  var diagEl = document.getElementById('diag');
+  var infoEl = document.getElementById('info');
+  document.getElementById('panelBadge').textContent = String(DISPLEJ);
+
+  function draw() {
+    var panelW = viewportEl.clientWidth;
+    var panelH = viewportEl.clientHeight;
+    var wallH = 3 * panelH + 2 * bezel;
+    var offsetY = -(DISPLEJ - 1) * (panelH + bezel);
+
+    wallEl.style.height = wallH + 'px';
+    wallEl.style.transform = 'translate3d(0, ' + offsetY + 'px, 0)';
+    wallEl.style.webkitTransform = 'translate3d(0, ' + offsetY + 'px, 0)';
+
+    // Sve osim SVG-a se ponovo crta.
+    var old = wallEl.querySelectorAll('.hline, .hlabel, .vline, .seam');
+    for (var i = 0; i < old.length; i++) wallEl.removeChild(old[i]);
+
+    // Horizontalne linije na poznatim razmacima kroz koordinate zida.
+    var step = 100;
+    for (var y = 0; y < wallH; y += step) {
+      var line = document.createElement('div');
+      var major = (y % 500) === 0;
+      line.className = 'hline' + (major ? ' major' : '');
+      line.style.top = y + 'px';
+      wallEl.appendChild(line);
+
+      if (major) {
+        var label = document.createElement('div');
+        label.className = 'hlabel';
+        label.style.top = (y + 12) + 'px';
+        label.textContent = y + ' px';
+        wallEl.appendChild(label);
+      }
+    }
+
+    // Vertikalne linije — ove moraju izgledati neprekinuto preko spojeva.
+    [0.25, 0.5, 0.75].forEach(function (fraction) {
+      var v = document.createElement('div');
+      v.className = 'vline';
+      v.style.left = Math.round(panelW * fraction) + 'px';
+      wallEl.appendChild(v);
+    });
+
+    // Gdje bi spojevi trebali biti — žuta isprekidana linija mora pasti tačno
+    // na donji rub gornjeg panela.
+    [panelH, panelH + bezel, 2 * panelH + bezel, 2 * (panelH + bezel)].forEach(function (y) {
+      var s = document.createElement('div');
+      s.className = 'seam';
+      s.style.top = y + 'px';
+      wallEl.appendChild(s);
+    });
+
+    diagEl.setAttribute('viewBox', '0 0 ' + panelW + ' ' + wallH);
+    diagEl.setAttribute('width', panelW);
+    diagEl.setAttribute('height', wallH);
+    diagEl.innerHTML =
+      '<line x1="0" y1="0" x2="' + panelW + '" y2="' + wallH + '" stroke="#3ddc84" stroke-width="5" />' +
+      '<line x1="' + panelW + '" y1="0" x2="0" y2="' + wallH + '" stroke="#3ddc84" stroke-width="5" />';
+
+    infoEl.textContent = [
+      'panel        ' + DISPLEJ,
+      'viewport     ' + panelW + ' × ' + panelH + ' css px',
+      'dpr          ' + window.devicePixelRatio,
+      'bezel        ' + bezel + ' px    (strelice gore/dolje mijenjaju za 2)',
+      'wall         ' + panelW + ' × ' + wallH + ' px',
+      'offsetY      ' + offsetY + ' px',
+      'master       ' + (panelW * window.devicePixelRatio) + ' × ' +
+        Math.round(wallH * window.devicePixelRatio) + ' px'
+    ].join('\n');
+  }
+
+  function setBezel(px) {
+    bezel = Math.max(0, px);
+    var url = location.pathname + '?displej=' + DISPLEJ + '&bezel=' + bezel;
+    history.replaceState(null, '', url);
+    draw();
+  }
+
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'ArrowUp' || e.key === '+') setBezel(bezel + 2);
+    else if (e.key === 'ArrowDown' || e.key === '-') setBezel(bezel - 2);
+  }, false);
+
+  window.addEventListener('resize', draw, false);
+
+  if (bezel === null) {
+    // Bez ?bezel= parametra uzimamo vrijednost iz postavki.
+    fetch('/api/playlist.json', { cache: 'no-store' })
+      .then(function (r) { return r.json(); })
+      .then(function (pl) { bezel = Number(pl.bezel) || 48; draw(); })
+      .catch(function () { bezel = 48; draw(); });
+  } else {
+    draw();
+  }
+})();
+</script>
+</body>
+</html>

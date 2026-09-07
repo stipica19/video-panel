@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="bs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Video zid — M0 smoke test</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hidden; }
+  body { color: #fff; font-family: Arial, Helvetica, sans-serif; cursor: none; }
+
+  #stage { position: fixed; top: 0; left: 0; right: 0; bottom: 0; overflow: hidden; background: #000; }
+  #motion { position: absolute; top: 0; left: 0; width: 100%; will-change: transform; }
+  #motion img { display: block; width: 100%; }
+
+  #panelText {
+    position: fixed; top: 0; left: 0; right: 0;
+    padding: 28px 32px;
+    background: rgba(0, 0, 0, 0.78);
+    font-family: "DejaVu Sans Mono", Menlo, Consolas, monospace;
+    font-size: 30px; line-height: 1.55; white-space: pre-wrap; word-break: break-all;
+    z-index: 10;
+  }
+  .ok { color: #3ddc84; }
+  .bad { color: #ff6b5e; }
+  .key { color: #ffd400; }
+</style>
+</head>
+<body>
+
+<div id="stage">
+  <div id="motion"><img id="testImg" alt=""></div>
+</div>
+<div id="panelText">mjerim…</div>
+
+<script>
+(function () {
+  'use strict';
+
+  var out = document.getElementById('panelText');
+  var img = document.getElementById('testImg');
+  var motion = document.getElementById('motion');
+
+  function esc(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  var lines = [];
+  function add(label, value, cls) {
+    lines.push('<span class="key">' + esc(label) + '</span>  ' +
+      (cls ? '<span class="' + cls + '">' + esc(value) + '</span>' : esc(value)));
+    out.innerHTML = lines.join('\n');
+  }
+
+  // NAJVAŽNIJI BROJ U PROJEKTU — od njega zavisi BEZEL_PX, WALL_H i master.
+  add('innerWidth × innerHeight', window.innerWidth + ' × ' + window.innerHeight);
+  add('devicePixelRatio        ', String(window.devicePixelRatio));
+  add('screen                  ', screen.width + ' × ' + screen.height);
+  add('outerWidth × outerHeight', window.outerWidth + ' × ' + window.outerHeight);
+  add('object-fit: cover       ',
+    (window.CSS && CSS.supports && CSS.supports('object-fit', 'cover')) ? 'da' : 'NE',
+    (window.CSS && CSS.supports && CSS.supports('object-fit', 'cover')) ? 'ok' : 'bad');
+  add('performance.now         ', typeof performance !== 'undefined' ? typeof performance.now : 'nema',
+    (typeof performance !== 'undefined' && typeof performance.now === 'function') ? 'ok' : 'bad');
+  add('fetch                   ', typeof fetch, typeof fetch === 'function' ? 'ok' : 'bad');
+  add('URL.createObjectURL     ', typeof URL !== 'undefined' ? typeof URL.createObjectURL : 'nema',
+    (typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function') ? 'ok' : 'bad');
+  add('userAgent               ', navigator.userAgent);
+
+  // Geometrija po izmjerenom viewportu, sa BEZEL_PX = 30 mm procjenom.
+  var pxPerMm = window.innerHeight / 680.4;
+  var bezelPx = Math.round(30 * pxPerMm / 2) * 2;
+  add('px/mm (izmjereno)       ', pxPerMm.toFixed(4));
+  add('BEZEL_PX za 30 mm       ', String(bezelPx) + ' px (paran)');
+  add('WALL_H                  ', String(3 * window.innerHeight + 2 * bezelPx) + ' px');
+  add('master (fizički px)     ',
+    (window.innerWidth * window.devicePixelRatio) + ' × ' +
+    Math.round((3 * window.innerHeight + 2 * bezelPx) * window.devicePixelRatio));
+
+  // Test dekodiranja velike slike + transform preko GPU kompozitora.
+  // Podrazumijevano se slika smije uzeti iz keša, da kalibracija ne skida 25 MP
+  // pri svakom reloadu. Za pošteno mjerenje hladnog starta: /m0?fresh=1
+  var FRESH = location.search.indexOf('fresh=1') >= 0;
+  var t0 = performance.now();
+
+  img.onload = function () {
+    var loadMs = performance.now() - t0;
+    add('test slika              ', img.naturalWidth + ' × ' + img.naturalHeight +
+      ', učitana za ' + Math.round(loadMs) + ' ms ' + cacheNote(img.src), 'ok');
+
+    var frames = 0;
+    var start = performance.now();
+    (function animate() {
+      var t = performance.now() - start;
+      if (t > 6000) {
+        var fps = frames / (t / 1000);
+        add('transform             ', fps.toFixed(1) + ' fps tokom 6 s',
+          fps > 45 ? 'ok' : 'bad');
+        return;
+      }
+      frames++;
+      var p = (t % 4000) / 4000;
+      var tf = 'translate3d(0, ' + (-p * 12).toFixed(3) + '%, 0) scale(' + (1 + p * 0.06).toFixed(4) + ')';
+      motion.style.transform = tf;
+      motion.style.webkitTransform = tf;
+      requestAnimationFrame(animate);
+    })();
+  };
+
+  img.onerror = function () {
+    add('test slika              ', 'nije nađena — pokreni npm run seed', 'bad');
+  };
+
+  // Da li je slika stigla sa mreže ili iz keša — transferSize 0 znači keš.
+  function cacheNote(src) {
+    if (FRESH) return '(svjež download)';
+    if (!performance.getEntriesByName) return '';
+    var entries = performance.getEntriesByName(src);
+    if (!entries.length || entries[0].transferSize === undefined) return '';
+    return entries[0].transferSize === 0 ? '(iz keša)' : '(sa mreže)';
+  }
+
+  img.src = '/media/m0-test.jpg' + (FRESH ? '?_=' + Date.now() : '');
+})();
+</script>
+</body>
+</html>
