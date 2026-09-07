@@ -15,7 +15,7 @@ env:
   # Folder aplikacije na serveru. Postavi repo varijablu APP_DIR
   # (Settings → Secrets and variables → Actions → Variables) ako nije ovdje.
   # Mora biti apsolutna putanja — "~/apps/..." ne radi, vidi provjeru niže.
-  APP_DIR: ${{ vars.APP_DIR || '/srv/videowall' }}
+  APP_DIR: ${{ vars.APP_DIR || '/app/video-panel' }}
 
 jobs:
   build:
