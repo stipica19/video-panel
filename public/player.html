@@ -309,11 +309,26 @@
     });
   }
 
+  // Odakle je fajl stigao: transferSize 0 znači da ga je browser panela imao u
+  // kešu. Jedini način da se sazna preživljava li keš Tizena gašenje panela —
+  // bez toga se o tome samo nagađa.
+  var lastLoad = { cache: 0, network: 0 };
+
+  function odakleStiglo(file, brojac) {
+    if (!performance.getEntriesByName) return;
+    var entries = performance.getEntriesByName(location.origin + file);
+    if (!entries.length) return;
+    var entry = entries[entries.length - 1];
+    if (entry.transferSize === undefined) return;
+    if (entry.transferSize === 0) brojac.cache++; else brojac.network++;
+  }
+
   function loadBundle(source, onProgress) {
     var items = source.items || [];
     var urls = {};
     var loaded = 0;
     var bytes = 0;
+    var brojac = { cache: 0, network: 0 };
     var chain = Promise.resolve();
 
     items.forEach(function (item) {
@@ -325,12 +340,14 @@
         }).then(function (blob) {
           urls[item.file] = URL.createObjectURL(blob);
           loaded++;
+          odakleStiglo(item.file, brojac);
           if (onProgress) onProgress(loaded, items.length, bytes);
         });
       });
     });
 
     return chain.then(function () {
+      lastLoad = brojac;
       var totalMs = 0;
       var prepared = items.map(function (item) {
         var durMs = Math.max(1000, Math.round(Number(item.duration) * 1000));
@@ -782,6 +799,7 @@
         ? 'pozicija ' + layer.video.currentTime.toFixed(2) + ' s, zaostatak ' +
           (videoDriftS * 1000).toFixed(0) + ' ms, brzina ' + layer.video.playbackRate.toFixed(3)
         : '—'),
+      'keš          ' + lastLoad.cache + ' iz keša, ' + lastLoad.network + ' sa mreže',
       'uptime       ' + Math.round((monoNow() - bootMonoMs) / 1000) + ' s',
       'greška       ' + (lastError || '—'),
       '',
