@@ -1,0 +1,31 @@
+# Stoji na VPS-u u /srv/videowall/. GitHub Action ga kopira pri svakom deployu.
+#
+# Vrijednosti dolaze iz /srv/videowall/.env — tamo su ADMIN_PASS, PANEL_TOKEN i
+# IMAGE (koji Action upisuje pri svakom deployu, pa je vraćanje na staru verziju
+# samo izmjena te linije i `docker compose up -d`).
+
+services:
+  videowall:
+    image: ${IMAGE:?IMAGE nije postavljen u .env}
+    container_name: videowall
+    restart: unless-stopped
+
+    env_file:
+      - .env
+
+    # Samo za nginx na istoj mašini. Bez nginxa ispred stavi "4000:4000",
+    # ali Tizen odbija nevažeći sertifikat — znači ipak treba nginx i HTTPS.
+    ports:
+      - "127.0.0.1:4000:4000"
+
+    volumes:
+      - videowall-data:/data
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  videowall-data:

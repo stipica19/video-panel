@@ -585,6 +585,21 @@ app.setErrorHandler((err, req, reply) => {
   reply.code(code).send({ error: err.message || 'Greška na serveru.' });
 });
 
+// Docker pri restartu šalje SIGTERM. Bez ovoga se čeka deset sekundi pa stiže
+// SIGKILL — a SQLite ne treba prekidati usred pisanja.
+for (const signal of ['SIGTERM', 'SIGINT']) {
+  process.once(signal, async () => {
+    app.log.info(`${signal} — gasim se`);
+    try {
+      await app.close();
+      db.close();
+    } catch (err) {
+      app.log.error(err);
+    }
+    process.exit(0);
+  });
+}
+
 await app.listen({ port: PORT, host: HOST });
 
 app.log.info(`player:      http://localhost:${PORT}/player?displej=1`);
