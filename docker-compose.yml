@@ -1,8 +1,13 @@
-# Stoji na VPS-u u /srv/videowall/. GitHub Action ga kopira pri svakom deployu.
+# Stoji na VPS-u u folderu aplikacije; GitHub Action ga kopira pri svakom deployu.
 #
-# Vrijednosti dolaze iz /srv/videowall/.env — tamo su ADMIN_PASS, PANEL_TOKEN i
+# Vrijednosti dolaze iz .env pored njega — tamo su ADMIN_PASS, PANEL_TOKEN i
 # IMAGE (koji Action upisuje pri svakom deployu, pa je vraćanje na staru verziju
 # samo izmjena te linije i `docker compose up -d`).
+
+# Ime projekta je fiksno, inače ga compose izvodi iz imena foldera — pa bi
+# premještanje aplikacije u drugi folder napravilo novi, prazan volumen i
+# izgledalo kao da su svi podaci nestali.
+name: videowall
 
 services:
   videowall:

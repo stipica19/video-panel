@@ -72,13 +72,24 @@ serveru povuče i podigne. Deploy prijavi uspjeh tek kad `/time` odgovori.
 
 ### Jednom, na serveru
 
+Folder može biti bilo koji — podrazumijevano `/srv/videowall`, a ako je aplikacija
+već negdje drugdje, samo postavi repo varijablu `APP_DIR` (Settings → Secrets and
+variables → Actions → **Variables**) na tu putanju.
+
+**Mora biti apsolutna.** `~/apps/video-panel` ne radi: tilda bi se proširila kod
+`mkdir` i `scp`, ali ne i u zadnjem koraku, pa bi deploy pukao na pola. Piši
+`/home/korisnik/apps/video-panel`. Workflow to i provjerava i javlja jasnu grešku.
+
+Ime compose projekta je fiksirano na `videowall`, pa volumen sa bazom i medijima
+ne zavisi od imena foldera — aplikacija se može premjestiti bez gubitka sadržaja.
+
 ```bash
 # Docker + compose plugin
 curl -fsSL https://get.docker.com | sh
 sudo usermod -aG docker "$USER"      # odjava i prijava nakon ovoga
 
-sudo mkdir -p /srv/videowall && sudo chown "$USER" /srv/videowall
-cd /srv/videowall
+mkdir -p ~/apps/video-panel          # ili gdje već stoji
+cd ~/apps/video-panel
 
 # Tajne koje ne idu u sliku ni u git.
 cat > .env <<'EOF'
@@ -95,7 +106,7 @@ osim kad vraćaš staru verziju.
 
 ### Jednom, na GitHubu
 
-Settings → Secrets and variables → Actions:
+Settings → Secrets and variables → Actions → **Secrets**:
 
 | Tajna             | Šta je                                                                  |
 | ----------------- | ----------------------------------------------------------------------- |
@@ -104,6 +115,12 @@ Settings → Secrets and variables → Actions:
 | `SSH_KEY`         | privatni ključ (cijeli, sa `-----BEGIN`), javni ide u `authorized_keys` |
 | `SSH_KNOWN_HOSTS` | izlaz iz `ssh-keyscan -H vps.adresa`                                    |
 | `SSH_PORT`        | opciono, ako SSH nije na 22                                             |
+
+Ista stranica, kartica **Variables**:
+
+| Varijabla | Šta je                                                             |
+| --------- | ------------------------------------------------------------------ |
+| `APP_DIR` | apsolutna putanja foldera na serveru; bez nje se koristi `/srv/videowall` |
 
 Ključ napravi zasebno za deploy, ne koristi svoj lični:
 

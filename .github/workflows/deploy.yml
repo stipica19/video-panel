@@ -12,7 +12,10 @@ concurrency:
 
 env:
   REGISTRY: ghcr.io
-  APP_DIR: /srv/videowall
+  # Folder aplikacije na serveru. Postavi repo varijablu APP_DIR
+  # (Settings → Secrets and variables → Actions → Variables) ako nije ovdje.
+  # Mora biti apsolutna putanja — "~/apps/..." ne radi, vidi provjeru niže.
+  APP_DIR: ${{ vars.APP_DIR || '/srv/videowall' }}
 
 jobs:
   build:
@@ -93,6 +96,14 @@ jobs:
           ssh -i ~/.ssh/id_deploy -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" \
             "APP_DIR='${{ env.APP_DIR }}' IMAGE='$IMAGE' GH_USER='$GH_USER' GH_TOKEN='$GH_TOKEN' bash -s" <<'REMOTE'
           set -euo pipefail
+
+          # Tilda se ovdje ne bi proširila (APP_DIR stiže pod navodnicima), pa bi
+          # `mkdir` i `scp` prošli a ovaj korak pukao uz nejasnu poruku.
+          case "$APP_DIR" in
+            /*) ;;
+            *) echo "APP_DIR mora biti apsolutna putanja, a dobio sam: $APP_DIR" >&2; exit 1 ;;
+          esac
+
           cd "$APP_DIR"
 
           # IMAGE se upisuje u .env: compose ga odatle čita, a na serveru se uvijek
