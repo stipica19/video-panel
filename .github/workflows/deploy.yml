@@ -68,6 +68,25 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Bez ove provjere prazna tajna završi kao "@" u ssh naredbi, a u logu se
+      # vidi samo ssh usage — po kojem se ne da pogoditi šta fali.
+      - name: Provjeri tajne
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_KEY: ${{ secrets.SSH_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+        run: |
+          nedostaje=""
+          for ime in SSH_HOST SSH_USER SSH_KEY SSH_KNOWN_HOSTS; do
+            [ -n "${!ime}" ] || nedostaje="$nedostaje $ime"
+          done
+          if [ -n "$nedostaje" ]; then
+            echo "::error::Nisu postavljene tajne:$nedostaje — Settings → Secrets and variables → Actions → Secrets"
+            exit 1
+          fi
+          echo "Tajne su na mjestu. Folder na serveru: ${{ env.APP_DIR }}"
+
       - name: SSH ključ
         run: |
           mkdir -p ~/.ssh && chmod 700 ~/.ssh
