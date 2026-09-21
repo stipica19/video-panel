@@ -36,25 +36,85 @@ nezavisno računa poziciju iz serverskog vremena — ako se razlikuju, sinhroniz
 
 ## Video
 
-Radi po **opciji A** iz `Claude.md`: panel dobija cijeli kadar i CSS-om prikazuje svoju trećinu,
-isto kao kod slika. Nema sječenja ffmpegom, nema reda poslova, razmak za okvire ostaje podesiv
-uživo. Cijena je što svaki panel dekodira cijeli frejm od 1920 × 3336 a prikazuje trećinu — to
-treba izmjeriti na pravom panelu prije nego se odluči da je gotovo.
+Radi po **opciji B** iz `Claude.md`: server reže svaki video na **tri dijela od 1920 × 1080** i
+svaki panel pušta samo svoj.
 
-- Prima se **.mp4 / .m4v / .mov, H.264 (avc1)**, do 200 MB (`MAX_VIDEO_MB`).
-- Trajanje, dimenzije i kodek čita `server/mp4.js` direktno iz kontejnera — **ffmpeg nije potreban**.
-  Rotacija sa telefona se poštuje, pa portret snimak ne biva odbijen kao pejzaž.
-- Trajanje stavke i pokret za video **nameće server**: trajanje je vlastito trajanje snimka, pokret
-  je `none`. Ken Burns preko videa je samo dodatni posao dekoderu.
-- Player pušta video iz blob URL-a (kao i slike) i stalno poredi `currentTime` sa serverskim satom:
-  sitno zaostajanje popravlja brzinom reprodukcije, veliko od 350 ms skokom.
-- Priprema materijala:
+**Zašto.** Prvo je bila opcija A — panel dobije cijeli kadar zida (1920 × 3336) i CSS-om prikaže
+svoju trećinu, isto kao kod slika. Slike tako rade, video ne: na Samsung QM55C (Tizen) ekran
+ostane crn, bez ijedne greške u konzoli. Hardverski dekoder ne pušta kadar viši od ~2160 px, a
+slika prolazi jer ide drugim putem. Isti fajl uredno radi na Fire TV Sticku, pa se na stolu ništa
+ne primijeti.
+
+### Tok posla
+
+1. Upload ide kao i do sada — prima se **.mp4 / .m4v / .mov, H.264 ili HEVC**, do 200 MB
+   (`MAX_VIDEO_MB`). Dimenzije, trajanje i kodek i dalje čita `server/mp4.js` iz kontejnera.
+2. `server/slicer.js` pokupi novi video u najviše 3 s (`setInterval` + zastavica, bez reda poslova)
+   i jednim pozivom ffmpega napravi tri fajla `<ime>-b<B>-1.mp4`, `-2`, `-3`.
+   **Jedan prolaz, ne tri poziva** — tako sva tri izlaza vide isti niz frejmova; tri odvojena
+   poziva umiju dati fajlove koji se razlikuju za jedan frejm, a taj drift se u browseru ne može
+   izliječiti. Piše se u `tmp/` pa se premješta u `media/`.
+3. Nakon rezanja `ffprobe -count_packets` broji frejmove u sva tri dijela. Ako se razlikuju, posao
+   je neuspio i ne objavljuje se ništa.
+4. Objava čeka: dok se neki video iz plejliste reže, `POST /api/publish` vraća **409** sa porukom
+   („video se još reže na tri dijela…”). Kad rezanje pukne, u biblioteci stoji greška i dugme
+   **Pokušaj ponovo**.
+
+U `playlist.json` video stavka nosi i `files` (tri putanje) pored starog `file`. Panel pušta
+`files[displej - 1]`.
+
+### Razmak za okvire i `panel_h`
+
+Rez zavisi od razmaka, pa se dijelovi imenuju po njemu. Razmak u pikselima videa nije isti broj
+kao `bezel_px`, koji je u CSS pikselima panela:
+
+```
+B = round(bezel_px × 1080 / panel_h)      zaokruženo na paran broj
+```
+
+`panel_h` je nova postavka (podrazumijevano 1080, dozvoljeno 400–4320) — visina panela u CSS px,
+onaj broj koji `/m0` ispiše. `B` mora biti paran: `yuv420p` ima poduzorkovanu hromu i neparan
+`y` offset tiho pomjeri boju.
+
+**Svaka izmjena `bezel_px` ili `panel_h` znači ponovno rezanje svih videa.** Stari dijelovi ostaju
+na disku dok se novi ne izrežu — objava koja se trenutno vrti i dalje čita svoje fajlove. Brišu se
+tek kad se obriše sam video.
+
+### Player
+
+- Video elementi su **izvan** slojeva sa slikama: `#videos` je ispod `#wall`. Na `<video>` nema
+  ni `transform`, ni `opacity`, ni `transition` — samo `visibility`. Na Tizenu video ide u zasebnu
+  hardversku ravninu i te osobine se ili ignorišu ili daju crn pravougaonik.
+- Video se pušta **pravo sa URL-a**, ne iz blob-a. `&videoblob=1` vraća staro ponašanje.
+- Prelaz: video se pokrene i pozicionira po serverskom satu, a **otkrije se tek kad ima frejm**
+  (`playing` / `timeupdate` sa `readyState >= 2`, najviše 2 s čekanja). Tek tada slika izblijedi —
+  zato nema crnog bljeska. Obrnuto, slika se fade-uje preko videa, pa se video nakon 400 ms
+  pauzira i oslobodi (`removeAttribute('src')` + `load()`), osim ako je sljedeća stavka isti video.
+- Zaostatak se i dalje popravlja brzinom reprodukcije, a od 350 ms skokom.
+- Stara objava bez `files` se i dalje vrti: player pusti cijeli kadar i pomjeri ga `top`-om.
+  HUD u tom slučaju piše **CIJELI KADAR (stara objava)**.
+- `/player?displej=N&hud=1` u redu `video` pokazuje poziciju, zaostatak, brzinu, `readyState`,
+  `videoWidth × videoHeight` i grešku, a red `video fajl` ime dijela koji taj panel pušta.
+
+### ffmpeg
+
+U Docker slici je `ffmpeg` instaliran. Lokalno mora biti u `PATH`, inače rezanje pukne sa
+„ffmpeg nije instaliran na serveru”. Putanje se mogu prebaciti sa `FFMPEG_PATH` i `FFPROBE_PATH`.
+
+```bash
+sudo apt install ffmpeg
+```
+
+Master se i dalje priprema kao kadar cijelog zida (server ga dalje reže sam):
 
 ```bash
 ffmpeg -i ulaz.mp4 -vf "scale=1920:3336:force_original_aspect_ratio=increase,crop=1920:3336" \
   -c:v libx264 -profile:v high -level 4.1 -pix_fmt yuv420p -preset veryfast -crf 20 \
   -r 25 -fps_mode cfr -g 25 -keyint_min 25 -sc_threshold 0 -movflags +faststart -an izlaz.mp4
 ```
+
+Trajanje stavke i pokret za video i dalje **nameće server**: trajanje je vlastito trajanje snimka,
+pokret je `none`.
 
 ## Redoslijed rada po `Claude.md`
 

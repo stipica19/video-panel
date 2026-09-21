@@ -36,6 +36,9 @@ if (!assetColumns.includes('duration')) {
 const insertSetting = db.prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)');
 insertSetting.run('bezel_px', '48');
 insertSetting.run('publish_delay_s', '90');
+// Visina panela u CSS px iz /m0. Iz nje se razmak za okvire prevodi u piksele
+// videa: dijelovi su uvijek 1080 px visoki, bez obzira šta panel prijavi.
+insertSetting.run('panel_h', '1080');
 
 const insertScreen = db.prepare('INSERT OR IGNORE INTO screens (n) VALUES (?)');
 for (const n of [1, 2, 3]) insertScreen.run(n);

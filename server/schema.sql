@@ -17,11 +17,25 @@ CREATE TABLE IF NOT EXISTS items (
   enabled INTEGER NOT NULL DEFAULT 1
 );
 
+-- Video izrezan na tri dijela, po jedan za svaki panel. Ključ je (asset, bezel)
+-- jer promjena razmaka za okvire mijenja i rez — stari dijelovi ostaju na disku
+-- dok se novi ne izrežu, da objava koja se trenutno vrti ne ostane bez fajlova.
+CREATE TABLE IF NOT EXISTS video_slices (
+  asset_id TEXT NOT NULL,
+  bezel INTEGER NOT NULL,      -- razmak u pikselima videa, ne u CSS px panela
+  status TEXT NOT NULL,        -- working | ready | error
+  files TEXT,                  -- JSON niz imena tri fajla na disku
+  frames INTEGER,              -- broj frejmova, isti za sva tri dijela
+  error TEXT,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (asset_id, bezel)
+);
+
 CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
--- bezel_px, current_version, current_epoch, next_version, next_active_from
+-- bezel_px, panel_h, current_version, current_epoch, next_version, next_active_from
 
 CREATE TABLE IF NOT EXISTS publications (
   version TEXT PRIMARY KEY,

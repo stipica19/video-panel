@@ -2,6 +2,16 @@
 
 export type MediaKind = 'image' | 'video';
 
+export type SliceStatus = 'pending' | 'working' | 'ready' | 'error';
+
+// Stanje rezanja videa na tri dijela, po jedan za svaki panel. Vezano je za
+// trenutni razmak za okvire — promjena bezela znači novo rezanje.
+export type Slices = {
+  status: SliceStatus;
+  error: string | null;
+  bezel: number;
+};
+
 export type Asset = {
   id: string;
   name: string;
@@ -15,6 +25,7 @@ export type Asset = {
   url: string;
   thumb: string | null; // video nema sličicu na disku
   ratio: number | null;
+  slices: Slices | null; // samo video
   warnings?: string[]; // samo u odgovoru na upload
 };
 
@@ -76,7 +87,10 @@ async function req<T>(url: string, init?: RequestInit): Promise<T> {
     let message = res.statusText;
     try {
       const body = await res.json();
-      if (body && body.error) message = body.error;
+      // Fastify u `error` stavlja ime statusa ("Conflict"), a pravu poruku u
+      // `message` — pa `message` ima prednost kad ga odgovor nosi.
+      if (body && body.message) message = body.message;
+      else if (body && body.error) message = body.error;
     } catch {
       // odgovor nije JSON — ostaje statusText
     }
@@ -105,6 +119,8 @@ export const api = {
   },
 
   deleteAsset: (id: string) => req<{ ok: true }>(`/api/assets/${id}`, { method: 'DELETE' }),
+
+  retrySlices: (id: string) => req<Slices>(`/api/assets/${id}/slices/retry`, { method: 'POST' }),
 
   items: () => req<Item[]>('/api/items'),
 

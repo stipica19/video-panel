@@ -1,23 +1,35 @@
 // Sastavljanje plejliste i dvofazna objava.
 import crypto from 'node:crypto';
 import { db, getSetting, setSetting } from './db.js';
+import { slicesFor } from './slicer.js';
 
 // Stavke iz baze u obliku koji player razumije.
 export function playableItems() {
   const rows = db.prepare(`
-    SELECT i.id, i.duration, i.motion, a.file, a.kind
+    SELECT i.id, i.duration, i.motion, i.asset_id, a.file, a.kind
     FROM items i JOIN assets a ON a.id = i.asset_id
     WHERE i.enabled = 1
     ORDER BY i.position ASC
   `).all();
 
-  return rows.map((r) => ({
-    id: r.id,
-    type: r.kind === 'video' ? 'video' : 'image',
-    file: '/media/' + r.file,
-    duration: Number(r.duration),
-    motion: JSON.parse(r.motion),
-  }));
+  return rows.map((r) => {
+    const item = {
+      id: r.id,
+      type: r.kind === 'video' ? 'video' : 'image',
+      file: '/media/' + r.file,
+      duration: Number(r.duration),
+      motion: JSON.parse(r.motion),
+    };
+
+    // Panel pušta samo svoju trećinu: `files[displej - 1]`. `file` ostaje zbog
+    // starih objava i zbog pregleda — player ga koristi samo ako `files` nema.
+    if (item.type === 'video') {
+      const slices = slicesFor(r.asset_id);
+      item.files = slices.status === 'ready' ? slices.files : null;
+    }
+
+    return item;
+  });
 }
 
 // Ako je stiglo vrijeme, `next` postaje `current`. Poziva se pri svakom čitanju
@@ -71,6 +83,31 @@ export function buildPlaylist() {
   return out;
 }
 
+// Objava sa videom koji još nije izrezan bi panelima poslala stavku bez
+// `files`, pa bi pali na cijeli kadar — a to je upravo crn ekran na Tizenu.
+function assertSlicesReady() {
+  const videos = db.prepare(`
+    SELECT a.id, a.name, MIN(i.position) AS pos
+    FROM items i JOIN assets a ON a.id = i.asset_id
+    WHERE i.enabled = 1 AND a.kind = 'video'
+    GROUP BY a.id
+    ORDER BY pos ASC
+  `).all();
+
+  for (const video of videos) {
+    const slices = slicesFor(video.id);
+    if (slices.status === 'ready') continue;
+
+    const err = new Error(
+      slices.status === 'error'
+        ? `${video.name}: rezanje nije uspjelo (${slices.error || 'nepoznata greška'})`
+        : `${video.name}: video se još reže na tri dijela — pokušaj objavu za minutu.`,
+    );
+    err.statusCode = 409;
+    throw err;
+  }
+}
+
 export function publish(delaySeconds) {
   promoteIfDue();
 
@@ -80,6 +117,8 @@ export function publish(delaySeconds) {
     err.statusCode = 400;
     throw err;
   }
+
+  assertSlicesReady();
 
   const payload = JSON.stringify(items);
   const version = crypto.createHash('sha256').update(payload).digest('hex').slice(0, 6);

@@ -31,6 +31,12 @@ ENV NODE_ENV=production \
 
 WORKDIR /app
 
+# ffmpeg reže svaki video na tri dijela od 1920 × 1080 (server/slicer.js).
+# Bez njega upload prolazi, ali objava staje sa "ffmpeg nije instaliran".
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends ffmpeg \
+  && rm -rf /var/lib/apt/lists/*
+
 COPY --from=deps /app/node_modules ./node_modules
 COPY package.json ./
 COPY server ./server

@@ -481,7 +481,19 @@ Ne kreni na M3 dok M1 ne radi stabilno nekoliko sati bez ijednog vidljivog rasko
 
 ---
 
-## Faza 2 — video (ne sada)
+## Faza 2 — video
+
+**Stanje: urađena opcija B.** Opcija A je bila napisana i radila je na stolu, ali na pravom
+panelu (QM55C, Tizen) video je davao crn ekran bez ijedne greške — hardverski dekoder ne pušta
+kadar viši od ~2160 px, a zid je 3336. Slike prolaze jer ne idu kroz taj dekoder, i isti fajl
+uredno radi na Fire TV Sticku, pa se problem ne vidi dok se ne proba na panelu. Zato server sad
+reže video na tri dijela od 1920 × 1080 (`server/slicer.js`), a panel dobija samo svoj.
+
+Uz to su pale još dvije Tizen zamke: video se pušta sa URL-a a ne iz blob-a, i na samom
+`<video>` nema ni transforma ni opacityja — video ide u zasebnu hardversku ravninu. Detalji su u
+sekciji „Video” u `README.md`.
+
+Ispod stoji originalno razmišljanje od prije odluke.
 
 Postojeći materijal je snimljen telefonom i amaterski montiran. Na zidu visokom dva metra to bi izgledalo loše bez obzira koliko dobro radi sinhronizacija — trostruko uvećanje već dvaput komprimovanog materijala, plus drhtanje ruke koje postaje ljuljanje od nekoliko centimetara.
 

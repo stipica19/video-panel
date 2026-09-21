@@ -14,6 +14,7 @@ import sharp from 'sharp';
 import { db, ROOT, MEDIA_DIR, THUMB_DIR, TMP_DIR, getSetting, setSetting, getAllSettings } from './db.js';
 import { buildPlaylist, publish, playableItems } from './playlist.js';
 import { probeMp4 } from './mp4.js';
+import { startSlicer, slicesFor, deleteSlicesFor, retrySlices } from './slicer.js';
 
 try {
   process.loadEnvFile(path.join(ROOT, '.env'));
@@ -34,10 +35,12 @@ const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 const MAX_VIDEO_BYTES = Number(process.env.MAX_VIDEO_MB || 200) * 1024 * 1024;
 const ALLOWED_FORMATS = { jpeg: 'jpg', png: 'png', webp: 'webp' };
 const ALLOWED_VIDEO_EXT = ['mp4', 'm4v', 'mov'];
+// Server ionako prekodira pri sječenju, pa je dovoljno da kontejner bude
+// čitljiv: H.264 (avc1/avc3) ili HEVC (hvc1/hev1).
+const ALLOWED_VIDEO_CODECS = ['avc1', 'avc3', 'hvc1', 'hev1'];
 const MAX_VIDEO_SECONDS = 600;
 
-// Ista naredba kao u Claude.md, samo bez sječenja na tri dijela — kod opcije A
-// panel dobija cijeli kadar i sam prikazuje svoju trećinu.
+// Master je kadar cijelog zida; na tri dijela ga reže server (server/slicer.js).
 const FFMPEG_HINT =
   'Pripremi ga sa: ffmpeg -i ulaz.mp4 -vf ' +
   '"scale=1920:3336:force_original_aspect_ratio=increase,crop=1920:3336" ' +
@@ -219,6 +222,9 @@ await app.register(async (scope) => {
       db.prepare('DELETE FROM assets WHERE id = ?').run(asset.id);
     })();
 
+    // Dijelovi su zasebni fajlovi i ne bi ih niko drugi pobrisao.
+    if (asset.kind === 'video') deleteSlicesFor(asset.id);
+
     // Fajl sa diska brišemo samo ako ga niko više ne koristi.
     const stillUsed = db.prepare('SELECT 1 FROM assets WHERE file = ?').get(asset.file);
     if (!stillUsed) {
@@ -227,6 +233,13 @@ await app.register(async (scope) => {
     }
 
     return { ok: true };
+  });
+
+  // Rezanje pukne rijetko (loš fajl, nestalo mjesta), ali kad pukne, red ostaje
+  // sa statusom `error` i posao ga više ne uzima — dok se ovim ne obriše.
+  scope.post('/api/assets/:id/slices/retry', (req, reply) => {
+    noStore(reply);
+    return retrySlices(req.params.id);
   });
 
   // --- plejlista ------------------------------------------------------------
@@ -351,6 +364,16 @@ await app.register(async (scope) => {
       setSetting('bezel_px', bezel);
     }
 
+    // Visina panela u CSS px (broj iz /m0). Iz nje slicer prevodi bezel_px u
+    // piksele videa, pa promjena znači novo rezanje svih videa.
+    if (body.panel_h != null) {
+      const panelH = Math.round(Number(body.panel_h));
+      if (!(panelH >= 400 && panelH <= 4320)) {
+        return reply.code(400).send({ error: 'panel_h mora biti 400–4320.' });
+      }
+      setSetting('panel_h', panelH);
+    }
+
     if (body.publish_delay_s != null) {
       const delay = Math.round(Number(body.publish_delay_s));
       if (!(delay >= 0 && delay <= 3600)) return reply.code(400).send({ error: 'publish_delay_s mora biti 0–3600.' });
@@ -369,6 +392,7 @@ function thumbName(file) {
 
 function withUrls(row) {
   const kind = row.kind === 'video' ? 'video' : 'image';
+  const slices = kind === 'video' ? slicesFor(row.id) : null;
   return {
     ...row,
     kind,
@@ -377,6 +401,8 @@ function withUrls(row) {
     // izvuče kadar. Tako ne treba ffmpeg samo zbog sličice u biblioteci.
     thumb: kind === 'video' ? null : '/media/thumbs/' + thumbName(row.file),
     ratio: row.width && row.height ? row.height / row.width : null,
+    // Sami fajlovi dijelova adminu ne trebaju — samo da li su spremni.
+    slices: slices ? { status: slices.status, error: slices.error, bezel: slices.bezel } : null,
   };
 }
 
@@ -481,8 +507,8 @@ async function storeVideo(part, originalName) {
   const probe = probeMp4(tmpPath);
   if (!probe.ok) drop(`${probe.reason} ${FFMPEG_HINT}`);
 
-  if (probe.codec !== 'avc1') {
-    drop(`Video mora biti H.264 (avc1), a ovaj je "${probe.codec || 'nepoznat'}". ${FFMPEG_HINT}`);
+  if (!ALLOWED_VIDEO_CODECS.includes(probe.codec)) {
+    drop(`Video mora biti H.264 ili HEVC, a ovaj je "${probe.codec || 'nepoznat'}". ${FFMPEG_HINT}`);
   }
   if (!(probe.durationS >= 1 && probe.durationS <= MAX_VIDEO_SECONDS)) {
     drop(`Trajanje ${probe.durationS.toFixed(1)} s je izvan dozvoljenog raspona 1–${MAX_VIDEO_SECONDS} s.`);
@@ -601,6 +627,10 @@ for (const signal of ['SIGTERM', 'SIGINT']) {
 }
 
 await app.listen({ port: PORT, host: HOST });
+
+// Sječenje videa kreće tek kad server sluša — prvi posao ne smije odgoditi
+// podizanje, a paneli u međuvremenu i dalje dobijaju staru objavu.
+startSlicer(app.log);
 
 app.log.info(`player:      http://localhost:${PORT}/player?displej=1`);
 app.log.info(`kalibracija: http://localhost:${PORT}/kalibracija?displej=1`);

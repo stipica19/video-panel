@@ -22,14 +22,32 @@
     overflow: hidden; background: #000;
   }
 
+  /* Video ne živi u sloju sa slikama. Na Tizenu <video> ide u posebnu
+     hardversku ravninu: transform, opacity i transition na njemu se ili
+     ignorišu ili daju crn pravougaonik. Zato mu ostaje samo visibility, a
+     slika prelazi preko njega — #wall je iznad #videos. */
+  #videos {
+    position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+    z-index: 0; background: #000;
+  }
+  #videos video {
+    position: absolute; top: 0; left: 0;
+    width: 100%; height: 100%;
+    object-fit: fill;
+    background: #000;
+    visibility: hidden;
+  }
+  #videos video.shown { visibility: visible; }
+
   /* Nosi pomak panela (translateY). Visina = WALL_H. */
   #wall {
     position: absolute; top: 0; left: 0; width: 100%;
+    z-index: 1;
     will-change: transform;
     -webkit-backface-visibility: hidden; backface-visibility: hidden;
   }
 
-  /* Sloj sa pokretom. Dva ih je, radi prelaza. */
+  /* Sloj sa pokretom. Dva ih je, radi prelaza. Samo slike — video je ispod. */
   .layer {
     position: absolute; top: 0; left: 0; width: 100%;
     opacity: 0;
@@ -38,13 +56,12 @@
     will-change: transform, opacity;
     -webkit-backface-visibility: hidden; backface-visibility: hidden;
   }
-  .layer img, .layer video {
+  .layer img {
     display: block; width: 100%; height: 100%;
     object-fit: cover;
     -webkit-user-drag: none;
     background: #000;
   }
-  .layer video { display: none; }
 
   /* Crn ekran sa porukom — nikad bijeli ekran. */
   #overlay {
@@ -77,15 +94,13 @@
 <body>
 
 <div id="viewport">
+  <div id="videos">
+    <video id="video0" muted playsinline webkit-playsinline preload="auto"></video>
+    <video id="video1" muted playsinline webkit-playsinline preload="auto"></video>
+  </div>
   <div id="wall">
-    <div class="layer" id="layer0">
-      <img alt="">
-      <video muted playsinline webkit-playsinline preload="auto"></video>
-    </div>
-    <div class="layer" id="layer1">
-      <img alt="">
-      <video muted playsinline webkit-playsinline preload="auto"></video>
-    </div>
+    <div class="layer" id="layer0"><img alt=""></div>
+    <div class="layer" id="layer1"><img alt=""></div>
   </div>
 </div>
 
@@ -115,6 +130,10 @@
   var HUD_ON = params.hud === '1';
   var PANEL_TOKEN = params.token || 'panel-dev-token';
   var BEZEL_OVERRIDE = params.bezel ? parseInt(params.bezel, 10) : null;
+  // Video se podrazumijevano pušta pravo sa URL-a: blob od stotinu megabajta
+  // Tizen ne preživi, a hardverski dekoder na blob izvoru zna ostati crn.
+  // `&videoblob=1` vraća staro ponašanje, za slučaj da mreža pravi problem.
+  var VIDEO_BLOB = params.videoblob === '1';
 
   var CLOCK_SYNC_MS = 60000;      // resinhronizacija sata
   var CLOCK_PROBES = 7;           // zahtjeva po sinhronizaciji, čuva se najbrži
@@ -127,6 +146,7 @@
   var VIDEO_SYNC_MS = 250;        // koliko često se provjerava zaostatak videa
   var VIDEO_SOFT_S = 0.04;        // ispod ovoga se ne dira ništa
   var VIDEO_HARD_S = 0.35;        // iznad ovoga ide skok umjesto brzine
+  var VIDEO_REVEAL_MS = 2000;     // koliko se najduže čeka prvi frejm
 
   // ------------------------------------------------------------------- elementi
 
@@ -139,17 +159,33 @@
 
   function makeLayer(id) {
     var el = document.getElementById(id);
-    var video = el.querySelector('video');
+    return { el: el, img: el.querySelector('img'), item: null, startMs: 0 };
+  }
+
+  function makeVideoSlot(id) {
+    var el = document.getElementById(id);
     // Atribut `muted` nije dovoljan na svim browserima da autoplay prođe.
-    video.muted = true;
-    video.defaultMuted = true;
-    video.loop = false;   // ciklus vodi sat, ne video element
-    return { el: el, img: el.querySelector('img'), video: video, item: null, startMs: 0 };
+    el.muted = true;
+    el.defaultMuted = true;
+    el.loop = false;   // ciklus vodi sat, ne video element
+
+    var slot = { el: el, item: null, startMs: 0, src: null, shown: false, cancelWait: null };
+
+    el.addEventListener('error', function () {
+      var code = el.error ? el.error.code : '?';
+      softError(new Error('Video greška ' + code + ' (' + shortName(slot.src) + ')'));
+    }, false);
+
+    return slot;
   }
 
   var layers = [makeLayer('layer0'), makeLayer('layer1')];
   var activeLayer = 0;
   var zCounter = 1;
+
+  var videos = [makeVideoSlot('video0'), makeVideoSlot('video1')];
+  var activeVideo = -1;   // indeks slota koji je u kadru, -1 kad ide slika
+  var videoZ = 1;
 
   // ---------------------------------------------------------------------- sat
 
@@ -236,6 +272,25 @@
     for (var i = 0; i < layers.length; i++) {
       layers[i].el.style.height = geom.wallH + 'px';
     }
+    for (var j = 0; j < videos.length; j++) {
+      applyVideoGeometry(videos[j]);
+    }
+  }
+
+  // Izrezani dio je tačno ono što panel prikazuje — puni ekran, bez pomaka.
+  // Stara objava bez dijelova nosi cijeli kadar zida, pa se mora pomjeriti; na
+  // <video> to ide preko `top`, nikad transformom.
+  function applyVideoGeometry(slot) {
+    var el = slot.el;
+    if (slot.item && slot.item.whole) {
+      el.style.height = geom.wallH + 'px';
+      el.style.top = (-(DISPLEJ - 1) * (geom.panelH + geom.bezel)) + 'px';
+      el.style.objectFit = 'cover';
+    } else {
+      el.style.height = '100%';
+      el.style.top = '0';
+      el.style.objectFit = 'fill';
+    }
   }
 
   function setBezel(px) {
@@ -282,6 +337,8 @@
   var switchTimer = null;
   var preloadTimer = null;
   var shownIndex = -1;
+  var shownItem = null;     // šta je trenutno u kadru, slika ili video
+  var shownStartMs = 0;     // kad je ta stavka počela, po serverskom satu
   var lastError = null;
   var bootMonoMs = monoNow();
 
@@ -323,6 +380,22 @@
     if (entry.transferSize === 0) brojac.cache++; else brojac.network++;
   }
 
+  // Koji fajl ovaj panel pušta. Server reže video na tri dijela od 1920 × 1080
+  // i šalje ih u `files` — dekoder na Tizenu ne pušta kadar viši od 2160 px, pa
+  // je cijeli zid od 1920 × 3336 crn ekran bez greške. `files` nema samo kod
+  // objava starijih od sječenja: tad ide cijeli kadar, pomjeren CSS-om.
+  function videoFileFor(item) {
+    if (item.files && item.files.length === 3 && item.files[DISPLEJ - 1]) {
+      return { file: item.files[DISPLEJ - 1], whole: false };
+    }
+    return { file: item.file, whole: true };
+  }
+
+  function fileFor(item) {
+    if (item.type === 'video') return videoFileFor(item);
+    return { file: item.file, whole: false };
+  }
+
   function loadBundle(source, onProgress) {
     var items = source.items || [];
     var urls = {};
@@ -332,15 +405,25 @@
     var chain = Promise.resolve();
 
     items.forEach(function (item) {
+      var pick = fileFor(item);
       chain = chain.then(function () {
-        if (urls[item.file]) { loaded++; return null; }
-        return fetchBlob(item.file, function (chunkBytes) {
+        if (urls[pick.file]) { loaded++; return null; }
+
+        // Video se ne uzima u memoriju: <video> ga vuče sam, sa URL-a.
+        if (item.type === 'video' && !VIDEO_BLOB) {
+          urls[pick.file] = pick.file;
+          loaded++;
+          if (onProgress) onProgress(loaded, items.length, bytes);
+          return null;
+        }
+
+        return fetchBlob(pick.file, function (chunkBytes) {
           bytes += chunkBytes;
           if (onProgress) onProgress(loaded, items.length, bytes);
         }).then(function (blob) {
-          urls[item.file] = URL.createObjectURL(blob);
+          urls[pick.file] = URL.createObjectURL(blob);
           loaded++;
-          odakleStiglo(item.file, brojac);
+          odakleStiglo(pick.file, brojac);
           if (onProgress) onProgress(loaded, items.length, bytes);
         });
       });
@@ -351,12 +434,14 @@
       var totalMs = 0;
       var prepared = items.map(function (item) {
         var durMs = Math.max(1000, Math.round(Number(item.duration) * 1000));
+        var pick = fileFor(item);
         totalMs += durMs;
         return {
           id: item.id,
           type: item.type === 'video' ? 'video' : 'image',
-          file: item.file,
-          url: urls[item.file],
+          file: pick.file,
+          whole: pick.whole,
+          url: urls[pick.file],
           durMs: durMs,
           motion: item.motion || { kind: 'none' }
         };
@@ -373,11 +458,16 @@
     });
   }
 
+  // Video se pušta sa svoje adrese, pa u mapi stoje i obični URL-ovi —
+  // revoke ide samo nad onim što je stvarno blob.
   function releaseBundle(bundle) {
     if (!bundle) return;
     for (var file in bundle.urls) {
       if (Object.prototype.hasOwnProperty.call(bundle.urls, file)) {
-        try { URL.revokeObjectURL(bundle.urls[file]); } catch (e) {}
+        var url = bundle.urls[file];
+        if (typeof url === 'string' && url.indexOf('blob:') === 0) {
+          try { URL.revokeObjectURL(url); } catch (e) {}
+        }
       }
     }
   }
@@ -405,29 +495,6 @@
     return { index: 0, offset: 0, startMs: t, boundaryMs: t + current.items[0].durMs };
   }
 
-  // Sloju se dodjeljuje slika ili video, nikad oboje. Element koji se ne koristi
-  // ostaje bez izvora da ne drži dekoder.
-  function assignMedia(layer, item) {
-    if (item.type === 'video') {
-      layer.img.style.display = 'none';
-      layer.img.removeAttribute('src');
-      layer.video.style.display = 'block';
-      if (layer.video.getAttribute('src') !== item.url) {
-        layer.video.src = item.url;
-        layer.video.load();
-      }
-    } else {
-      if (layer.video.getAttribute('src')) {
-        layer.video.pause();
-        layer.video.removeAttribute('src');
-        layer.video.load();
-      }
-      layer.video.style.display = 'none';
-      layer.img.style.display = 'block';
-      if (layer.img.getAttribute('src') !== item.url) layer.img.src = item.url;
-    }
-  }
-
   // Pozicija u videu se postavlja prema serverskom satu, isto kao faza Ken
   // Burnsa kod slika. Razlika je što ovdje postoji dekoder koji može zaostati.
   function seekVideo(video, seconds) {
@@ -442,16 +509,91 @@
     video.addEventListener('loadedmetadata', once, false);
   }
 
-  function startVideo(layer, item, startMs) {
+  function slotIndex(slot) { return slot === videos[0] ? 0 : 1; }
+
+  // Slot u kojem je taj fajl već učitan (preload), inače prvi slobodan.
+  function slotFor(item) {
+    var i;
+    for (i = 0; i < videos.length; i++) if (videos[i].src === item.url) return videos[i];
+    for (i = 0; i < videos.length; i++) if (!videos[i].shown) return videos[i];
+    return videos[0];
+  }
+
+  function attachVideo(slot, item) {
+    slot.item = item;
+    applyVideoGeometry(slot);
+    if (slot.src === item.url) return;
+    cancelWait(slot);
+    slot.src = item.url;
+    slot.el.src = item.url;
+    slot.el.load();
+  }
+
+  function hideVideo(slot) {
+    slot.shown = false;
+    slot.el.className = '';
+    if (!slot.el.paused) slot.el.pause();
+  }
+
+  // Dekoder se pušta tek ovdje: bez removeAttribute + load() Tizen drži
+  // hardversku ravninu zauzetom i sljedeći video ostane crn.
+  function releaseVideo(slot) {
+    cancelWait(slot);
+    hideVideo(slot);
+    slot.item = null;
+    slot.startMs = 0;
+    if (slot.src) {
+      slot.src = null;
+      slot.el.removeAttribute('src');
+      slot.el.load();
+    }
+  }
+
+  function cancelWait(slot) {
+    if (slot.cancelWait) slot.cancelWait();
+  }
+
+  // Video se otkriva tek kad stvarno ima frejm. Dok ga nema, iznad njega stoji
+  // slika prethodne stavke — zato prelaz nema crnog bljeska.
+  function waitForFrame(slot, onReady) {
+    cancelWait(slot);
+    var video = slot.el;
+    var done = false;
+
+    function finish() {
+      if (done) return;
+      done = true;
+      cancelWait(slot);
+      onReady();
+    }
+
+    function onTime() { if (video.readyState >= 2) finish(); }
+
+    video.addEventListener('playing', finish, false);
+    video.addEventListener('timeupdate', onTime, false);
+    // Ako dekoder ništa ne javi — a Tizen zna ćutati — otkrivamo ga svejedno.
+    var timer = setTimeout(finish, VIDEO_REVEAL_MS);
+
+    slot.cancelWait = function () {
+      clearTimeout(timer);
+      video.removeEventListener('playing', finish, false);
+      video.removeEventListener('timeupdate', onTime, false);
+      slot.cancelWait = null;
+    };
+
+    if (video.readyState >= 2 && !video.seeking) finish();
+  }
+
+  function startVideo(slot, item, startMs) {
     var wanted = (serverNow() - startMs) / 1000;
     var limit = item.durMs / 1000 - 0.05;
     if (wanted < 0) wanted = 0;
     if (limit > 0 && wanted > limit) wanted = limit;
 
-    seekVideo(layer.video, wanted);
-    layer.video.playbackRate = 1;
+    seekVideo(slot.el, wanted);
+    slot.el.playbackRate = 1;
 
-    var promise = layer.video.play();
+    var promise = slot.el.play();
     if (promise && promise.catch) {
       promise.catch(function (err) {
         softError(new Error('Video se ne pokreće: ' + (err && err.message ? err.message : err)));
@@ -459,23 +601,41 @@
     }
   }
 
-  function showItem(index, startMs) {
-    var item = current.items[index];
-    if (!item) return;
+  function showVideo(item, startMs, nextItem) {
+    var slot = slotFor(item);
+    attachVideo(slot, item);
+    slot.startMs = startMs;
+    activeVideo = slotIndex(slot);
 
-    // Zaostali preload prethodnog prelaza bi prepisao sloj koji upravo postaje
-    // aktivan — sloj bi ostao bez stavke ili sa pogrešnom.
-    if (preloadTimer) { clearTimeout(preloadTimer); preloadTimer = null; }
+    startVideo(slot, item, startMs);
+    waitForFrame(slot, function () { revealVideo(slot, nextItem); });
+  }
 
-    shownIndex = index;
+  function revealVideo(slot, nextItem) {
+    // Frejm je stigao sa zakašnjenjem, a stavka je otišla dalje: otkrivanje bi
+    // sad sakrilo sliku koja je već u kadru i ostavilo zamrznut video na zidu.
+    if (activeVideo < 0 || videos[activeVideo] !== slot) return;
 
+    videoZ++;
+    slot.el.style.zIndex = String(videoZ);
+    slot.el.className = 'shown';
+    slot.shown = true;
+
+    // Tek sad slika izlazi. Obrnut redoslijed bi dao crn ekran na trenutak.
+    for (var i = 0; i < layers.length; i++) layers[i].el.style.opacity = '0';
+
+    var other = videos[1 - slotIndex(slot)];
+    if (other.shown) hideVideo(other);
+    releaseLater(other, nextItem);
+  }
+
+  function showImage(item, startMs, nextItem) {
     var back = 1 - activeLayer;
     var layer = layers[back];
 
-    assignMedia(layer, item);
+    if (layer.img.getAttribute('src') !== item.url) layer.img.src = item.url;
     layer.item = item;
     layer.startMs = startMs;
-    if (item.type === 'video') startVideo(layer, item, startMs);
 
     var t = serverNow();
     var p = clamp01((t - startMs) / item.durMs);
@@ -486,24 +646,75 @@
     layer.el.style.zIndex = String(zCounter);
     layer.el.style.opacity = '1';
     layers[activeLayer].el.style.opacity = '0';
-
     activeLayer = back;
 
-    // Nakon prelaza sljedeću sliku odmah ubaci u sloj koji je izašao,
+    // Slika se fade-uje preko videa; video se gasi tek kad prelaz prođe.
+    // Gase se svi slotovi u kadru, ne samo aktivni: zaostao dekoder na Tizenu
+    // je tačno ono zbog čega sljedeći video ostane crn.
+    var leaving = [];
+    for (var i = 0; i < videos.length; i++) {
+      if (videos[i].shown || i === activeVideo) leaving.push(videos[i]);
+    }
+    activeVideo = -1;
+    for (var k = 0; k < leaving.length; k++) {
+      cancelWait(leaving[k]);   // frejm koji tek stigne više nikog ne zanima
+      releaseLater(leaving[k], nextItem);
+    }
+  }
+
+  // Slot izlazi iz kadra: pauza i skrivanje odmah po isteku prelaza, a
+  // oslobađanje samo ako sljedeća stavka nije taj isti video.
+  function releaseLater(slot, nextItem) {
+    setTimeout(function () {
+      if (activeVideo >= 0 && videos[activeVideo] === slot) return;   // opet je u kadru
+      hideVideo(slot);
+      if (nextItem && nextItem.type === 'video' && slot.src && slot.src === nextItem.url) {
+        seekVideo(slot.el, 0);
+        return;
+      }
+      releaseVideo(slot);
+    }, FADE_MS);
+  }
+
+  function showItem(index, startMs) {
+    var item = current.items[index];
+    if (!item) return;
+
+    // Zaostali preload prethodnog prelaza bi prepisao sloj ili slot koji upravo
+    // postaje aktivan — sloj bi ostao bez stavke ili sa pogrešnom.
+    if (preloadTimer) { clearTimeout(preloadTimer); preloadTimer = null; }
+
+    shownIndex = index;
+    shownItem = item;
+    shownStartMs = startMs;
+
+    var nextItem = current.items[(index + 1) % current.items.length] || null;
+
+    if (item.type === 'video') showVideo(item, startMs, nextItem);
+    else showImage(item, startMs, nextItem);
+
+    // Nakon prelaza sljedeća stavka odmah ide u slobodan sloj odnosno slot,
     // da dekodiranje ne padne na trenutak prebacivanja.
-    var nextIndex = (index + 1) % current.items.length;
-    var idle = layers[1 - activeLayer];
     preloadTimer = setTimeout(function () {
       preloadTimer = null;
-      var nextItem = current.items[nextIndex];
       if (!nextItem) return;
-      idle.item = null;
-      // Sloj koji je izašao više se ne vidi — ako je vrtio video, dekoder se
-      // pušta prije nego što se učita sljedeća stavka.
-      if (!idle.video.paused) idle.video.pause();
-      assignMedia(idle, nextItem);
-      if (nextItem.type === 'video') idle.video.pause();
+      if (nextItem.type === 'video') preloadVideo(nextItem);
+      else preloadImage(nextItem);
     }, FADE_MS + 100);
+  }
+
+  function preloadImage(item) {
+    var idle = layers[1 - activeLayer];
+    idle.item = null;
+    if (idle.img.getAttribute('src') !== item.url) idle.img.src = item.url;
+  }
+
+  function preloadVideo(item) {
+    var slot = slotFor(item);
+    if (slot.shown || slotIndex(slot) === activeVideo) return;   // nema slobodnog
+    attachVideo(slot, item);
+    slot.el.pause();
+    seekVideo(slot.el, 0);
   }
 
   // Prelaz se zakazuje na tačan trenutak po serverskom satu, ne petljom.
@@ -522,9 +733,8 @@
         // Ako je tajmer opalio prije granice, ovo je i dalje ista stavka iz
         // istog ciklusa — ne prikazuj je ponovo, samo zakaži nanovo. Kod
         // plejliste od jedne stavke ciklus se prepoznaje po novom početku.
-        var active = layers[activeLayer];
-        var repeat = s.index === shownIndex && active.item &&
-          Math.abs(active.startMs - s.startMs) < 200;
+        var repeat = s.index === shownIndex && shownItem &&
+          Math.abs(shownStartMs - s.startMs) < 200;
         if (!repeat) showItem(s.index, s.startMs);
       }
       scheduleTransition();
@@ -534,6 +744,8 @@
   function startPlayback() {
     hideOverlay();
     shownIndex = -1;   // nova plejlista: prikaz se uvijek osvježava
+    shownItem = null;
+    shownStartMs = 0;
     var t = serverNow();
     var state = cycleState(t);
     if (!state) {
@@ -553,7 +765,6 @@
     for (var i = 0; i < layers.length; i++) {
       var layer = layers[i];
       if (!layer.item) continue;
-      if (layer.item.type === 'video') continue;   // video nosi svoj pokret
       var p = clamp01((t - layer.startMs) / layer.item.durMs);
       var tf = motionTransform(layer.item.motion, p);
       layer.el.style.transform = tf;
@@ -571,14 +782,16 @@
   var videoDriftS = 0;
 
   function syncVideo() {
-    var layer = layers[activeLayer];
-    if (!layer.item || layer.item.type !== 'video') { videoDriftS = 0; return; }
+    if (activeVideo < 0) { videoDriftS = 0; return; }
 
-    var video = layer.video;
+    var slot = videos[activeVideo];
+    if (!slot.item || slot.item.type !== 'video') { videoDriftS = 0; return; }
+
+    var video = slot.el;
     if (video.seeking || video.readyState < 2) return;
 
-    var wanted = (serverNow() - layer.startMs) / 1000;
-    if (wanted < 0 || wanted > layer.item.durMs / 1000) return;
+    var wanted = (serverNow() - slot.startMs) / 1000;
+    if (wanted < 0 || wanted > slot.item.durMs / 1000) return;
 
     videoDriftS = video.currentTime - wanted;
     var drift = Math.abs(videoDriftS);
@@ -703,12 +916,11 @@
   // ------------------------------------------------------------------ heartbeat
 
   function heartbeat() {
-    var layer = layers[activeLayer];
     var body = {
       displej: DISPLEJ,
       version: current ? current.version : null,
       ready: readyVersion,
-      itemId: layer.item ? layer.item.id : null,
+      itemId: shownItem ? shownItem.id : null,
       clockOffsetMs: Math.round(clock.offsetMs * 10) / 10,
       uptimeS: Math.round((monoNow() - bootMonoMs) / 1000),
       error: lastError
@@ -774,6 +986,12 @@
     return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   }
 
+  function shortName(url) {
+    if (!url) return '—';
+    var parts = String(url).split('/');
+    return parts[parts.length - 1];
+  }
+
   var logLines = [];
   function log(msg) {
     logLines.push(msg);
@@ -781,8 +999,25 @@
     if (window.console && console.log) console.log('[zid]', msg);
   }
 
+  function videoHudLine() {
+    if (activeVideo < 0) return '—';
+    var slot = videos[activeVideo];
+    if (!slot.item) return '—';
+
+    var v = slot.el;
+    var parts = [
+      'pozicija ' + v.currentTime.toFixed(2) + ' s',
+      'zaostatak ' + (videoDriftS * 1000).toFixed(0) + ' ms',
+      'brzina ' + v.playbackRate.toFixed(3),
+      'readyState ' + v.readyState,
+      v.videoWidth + ' × ' + v.videoHeight
+    ];
+    if (v.error) parts.push('greška ' + v.error.code);
+    if (slot.item.whole) parts.push('CIJELI KADAR (stara objava)');
+    return parts.join(', ');
+  }
+
   function drawHud(t) {
-    var layer = layers[activeLayer];
     var state = cycleState(t);
     var lines = [
       'panel        ' + DISPLEJ + '   ' + geom.panelW + ' × ' + geom.panelH + ' css px',
@@ -792,13 +1027,11 @@
       'serverNow    ' + new Date(t).toISOString().slice(11, 23),
       'verzija      ' + (current ? current.version : '—') +
         (pending ? '  →  ' + pending.version + ' u ' + new Date(pending.activeFrom).toISOString().slice(11, 19) : ''),
-      'stavka       ' + (layer.item ? layer.item.id : '—') +
+      'stavka       ' + (shownItem ? shownItem.id : '—') +
         (state ? '  ' + (state.index + 1) + '/' + current.items.length +
           '  p=' + (state.offset / current.items[state.index].durMs).toFixed(3) : ''),
-      'video        ' + (layer.item && layer.item.type === 'video'
-        ? 'pozicija ' + layer.video.currentTime.toFixed(2) + ' s, zaostatak ' +
-          (videoDriftS * 1000).toFixed(0) + ' ms, brzina ' + layer.video.playbackRate.toFixed(3)
-        : '—'),
+      'video        ' + videoHudLine(),
+      'video fajl   ' + (shownItem && shownItem.type === 'video' ? shortName(shownItem.file) : '—'),
       'keš          ' + lastLoad.cache + ' iz keša, ' + lastLoad.network + ' sa mreže',
       'uptime       ' + Math.round((monoNow() - bootMonoMs) / 1000) + ' s',
       'greška       ' + (lastError || '—'),
